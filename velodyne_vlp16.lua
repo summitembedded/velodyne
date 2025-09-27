@@ -1,7 +1,22 @@
--- Velodyne VLP-16 Dissector for Wireshark (No Header, No Block Status)
--- Supports UDP port 2372, payload starts with data blocks (0xFFEE BE at offset 0)
--- Parses up to 12 data blocks (100 bytes each: ID BE + azimuth BE + 32 lasers (3 bytes each: dist LE + int))
--- Handles shorter payloads (your 1206 bytes)
+-- Copyright (C) 2025 Summit Embedded
+--
+-- This program is free software: you can redistribute it and/or modify
+-- it under the terms of the GNU General Public License as published by
+-- the Free Software Foundation, either version 3 of the License, or
+-- (at your option) any later version.
+--
+-- This program is distributed in the hope that it will be useful,
+-- but WITHOUT ANY WARRANTY; without even the implied warranty of
+-- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-- GNU General Public License for more details.
+--
+-- You should have received a copy of the GNU General Public License
+-- along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+-- INSTALL NOTE: Place this file in your Wireshark plugins directory, e.g.
+--      ~/.local/lib/wireshark/plugins/ on Linux
+--      or C:\Program Files\Wireshark\plugins\ on Windows
+-- then restart Wireshark.
 
 local velodyne_vlp16 = Proto("velodyne_vlp16", "Velodyne VLP-16 Packet")
 
@@ -12,10 +27,22 @@ local f_distance = ProtoField.float("velodyne.distance", "Distance (m, LE)")
 local f_intensity = ProtoField.float("velodyne.intensity", "Intensity (0-1)")
 local f_laser_id = ProtoField.uint8("velodyne.laser_id", "Laser ID (0-15)")
 
--- Footer
-local f_footer = ProtoField.bytes("velodyne.footer", "Footer (6 bytes)")
+-- Footer fields
+local f_footer_timestamp_raw = ProtoField.uint32("velodyne.footer_timestamp_raw", "Footer Timestamp Raw (uint32 LE)")
+local f_footer_timestamp_sec = ProtoField.float("velodyne.footer_timestamp_sec", "Footer Timestamp (seconds)")
+local return_mode_valuestring = {
+    [0x37] = "Strongest Return",
+    [0x38] = "Last Return",
+    [0x39] = "Dual Return"
+}
+local f_footer_return_mode = ProtoField.uint8("velodyne.footer_return_mode", "Return Mode", base.HEX, return_mode_valuestring)
+local sensor_type_valuestring = {
+    [0x21] = "HDL-32E",
+    [0x22] = "VLP-16"
+}
+local f_footer_sensor_type = ProtoField.uint8("velodyne.footer_sensor_type", "Sensor Type", base.HEX, sensor_type_valuestring)
 
-velodyne_vlp16.fields = { f_block_id, f_azimuth, f_distance, f_intensity, f_laser_id, f_footer }
+velodyne_vlp16.fields = { f_block_id, f_azimuth, f_distance, f_intensity, f_laser_id, f_footer_timestamp_raw, f_footer_timestamp_sec, f_footer_return_mode, f_footer_sensor_type }
 
 -- Dissector function
 function velodyne_vlp16.dissector(buffer, pinfo, tree)
@@ -45,8 +72,8 @@ function velodyne_vlp16.dissector(buffer, pinfo, tree)
 
         local block_tree = subtree:add(tree, buffer(block_start, 100), "Data Block " .. (block + 1) .. " (ID: 0xFFEE)")
 
-        -- Azimuth (bytes 2-3, uint16 BE / 100)
-        local azimuth_raw = buffer(block_start + 2, 2):uint(1)  -- Big-endian
+        -- Azimuth (bytes 2-3, uint16 LE / 100)
+        local azimuth_raw = buffer(block_start + 2, 2):le_uint()  -- Little-endian
         local azimuth_deg = azimuth_raw / 100.0
         block_tree:add(f_azimuth, buffer(block_start + 2, 2), azimuth_deg)
 
@@ -57,9 +84,9 @@ function velodyne_vlp16.dissector(buffer, pinfo, tree)
             if laser_start + 3 > block_start + 100 then
                 break
             end
-            local dist_raw = buffer(laser_start, 2):uint(0)  -- Little-endian
+            local dist_raw = buffer(laser_start, 2):le_uint()  -- Little-endian
             local dist_m = dist_raw * 0.002  -- Scale to meters
-            local intensity_raw = buffer(laser_start + 2, 1):uint()
+            local intensity_raw = buffer(laser_start + 2, 1):le_int()
             local intensity_norm = intensity_raw / 255.0
 
             -- Add laser subtree
@@ -78,13 +105,32 @@ function velodyne_vlp16.dissector(buffer, pinfo, tree)
     -- Footer (last 6 bytes, if length >= 1200)
     if length >= 1200 then
         local footer_start = length - 6
-        subtree:add(f_footer, buffer(footer_start, 6))
+        local footer_tree = subtree:add(tree, buffer(footer_start, 6), "Footer (6 bytes)")
+        
+        -- Timestamp (bytes 0-3 of footer, uint32 LE)
+        local timestamp_raw = buffer(footer_start, 4):le_int()  -- Little-endian
+        footer_tree:add(f_footer_timestamp_raw, buffer(footer_start, 4), timestamp_raw)
+        
+        -- Scaled timestamp (seconds)
+        local timestamp_sec = timestamp_raw * 1e-6
+        footer_tree:add(f_footer_timestamp_sec, buffer(footer_start, 4), timestamp_sec)
+        
+        -- Return Mode (byte 4 of footer)
+        local return_mode = buffer(footer_start + 4, 1):le_int()
+        footer_tree:add(f_footer_return_mode, buffer(footer_start + 4, 1), return_mode)
+        
+        -- Sensor Type (byte 5 of footer)
+        local sensor_type = buffer(footer_start + 5, 1):le_int()
+        footer_tree:add(f_footer_sensor_type, buffer(footer_start + 5, 1), sensor_type)
     end
 
     -- Summary in info column
     pinfo.cols.info = "Valid points: " .. valid_points .. "/" .. (max_blocks * 32) .. " (0.4-120m, intensity >0.1)"
 end
 
--- Register for UDP port 2372
+-- Register for UDP ports 2368 to 2372. Default is 2368, but some systems use others if multiple
+-- devices are transmitting
 local udp_port_table = DissectorTable.get("udp.port")
-udp_port_table:add(2372, velodyne_vlp16)
+for port = 2368, 2372 do
+    udp_port_table:add(port, velodyne_vlp16)
+end
