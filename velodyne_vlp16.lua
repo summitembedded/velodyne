@@ -86,7 +86,7 @@ function velodyne_vlp16.dissector(buffer, pinfo, tree)
             end
             local dist_raw = buffer(laser_start, 2):le_uint()  -- Little-endian
             local dist_m = dist_raw * 0.002  -- Scale to meters
-            local intensity_raw = buffer(laser_start + 2, 1):le_int()
+            local intensity_raw = buffer(laser_start + 2, 1):le_uint()
             local intensity_norm = intensity_raw / 255.0
 
             -- Add laser subtree
@@ -108,7 +108,7 @@ function velodyne_vlp16.dissector(buffer, pinfo, tree)
         local footer_tree = subtree:add(tree, buffer(footer_start, 6), "Footer (6 bytes)")
         
         -- Timestamp (bytes 0-3 of footer, uint32 LE)
-        local timestamp_raw = buffer(footer_start, 4):le_int()  -- Little-endian
+        local timestamp_raw = buffer(footer_start, 4):le_uint()  -- Little-endian
         footer_tree:add(f_footer_timestamp_raw, buffer(footer_start, 4), timestamp_raw)
         
         -- Scaled timestamp (seconds)
@@ -116,11 +116,11 @@ function velodyne_vlp16.dissector(buffer, pinfo, tree)
         footer_tree:add(f_footer_timestamp_sec, buffer(footer_start, 4), timestamp_sec)
         
         -- Return Mode (byte 4 of footer)
-        local return_mode = buffer(footer_start + 4, 1):le_int()
+        local return_mode = buffer(footer_start + 4, 1):le_uint()
         footer_tree:add(f_footer_return_mode, buffer(footer_start + 4, 1), return_mode)
         
         -- Sensor Type (byte 5 of footer)
-        local sensor_type = buffer(footer_start + 5, 1):le_int()
+        local sensor_type = buffer(footer_start + 5, 1):le_uint()
         footer_tree:add(f_footer_sensor_type, buffer(footer_start + 5, 1), sensor_type)
     end
 

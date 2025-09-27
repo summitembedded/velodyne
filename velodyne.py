@@ -1,11 +1,12 @@
 from scapy.all import rdpcap, UDP
 import struct
 import numpy as np
+import os
 
 def parse_vlp16_packet(payload):
-    # VLP-16 packet: 42-byte header + 12 blocks (100 bytes each) + 6-byte footer = 1206 bytes
-    if len(payload) != 1206:
-        return f"Invalid packet length: {len(payload)} bytes, expected 1206"
+    # VLP-16 packet: 42-byte header + 12 blocks (100 bytes each) + 6-byte footer = 1248 bytes
+    if len(payload) != 1248:
+        return f"Invalid packet length: {len(payload)} bytes, expected 1248"
     
     distances = []
     intensities = []
@@ -65,10 +66,10 @@ def parse_vlp16_packet(payload):
     return distances, intensities
 
 # Load PCAP and parse first UDP packet
-pcap = rdpcap('/home/george/nobackup/temp/velodyne-vlp16-1.pcapng')
+pcap = rdpcap('velodyne-vlp16-1.pcapng')
 for pkt in pcap:
     if UDP in pkt and pkt[UDP].dport == 2372:
-        payload = bytes(pkt[UDP].payload)
+        payload = bytes(pkt)
         result = parse_vlp16_packet(payload)
         if isinstance(result, str):
             print(result)
