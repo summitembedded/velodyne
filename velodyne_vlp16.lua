@@ -22,7 +22,7 @@ local velodyne_vlp16 = Proto("velodyne_vlp16", "Velodyne VLP-16 Packet")
 
 -- Block fields
 local f_block_id = ProtoField.uint16("velodyne.block_id", "Block ID (0xFFEE BE)")
-local f_azimuth = ProtoField.float("velodyne.azimuth", "Azimuth Angle (deg, BE)")
+local f_azimuth = ProtoField.float("velodyne.azimuth", "Azimuth Angle (deg)")
 local f_distance = ProtoField.float("velodyne.distance", "Distance (m, LE)")
 local f_intensity = ProtoField.float("velodyne.intensity", "Intensity (0-1)")
 local f_laser_id = ProtoField.uint8("velodyne.laser_id", "Laser ID (0-15)")
