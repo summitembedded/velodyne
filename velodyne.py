@@ -2,6 +2,7 @@ from scapy.all import rdpcap, UDP
 import struct
 import numpy as np
 import os
+import sys
 
 def parse_vlp16_packet(payload):
     # VLP-16 packet: 42-byte header + 12 blocks (100 bytes each) + 6-byte footer = 1248 bytes
@@ -64,6 +65,9 @@ def parse_vlp16_packet(payload):
     print(f"Azimuth range: {azimuth_range}")
     print(f"Average intensity: {intensity_mean:.2f}")
     return distances, intensities
+
+print(f"This is a work in progress. Not working yet.")
+sys.exit(0)
 
 # Load PCAP and parse first UDP packet
 pcap = rdpcap('velodyne-vlp16-1.pcapng')
