@@ -44,6 +44,17 @@ local f_footer_sensor_type = ProtoField.uint8("velodyne.footer_sensor_type", "Se
 
 velodyne_vlp16.fields = { f_block_id, f_azimuth, f_distance, f_intensity, f_laser_id, f_footer_timestamp_raw, f_footer_timestamp_sec, f_footer_return_mode, f_footer_sensor_type }
 
+-- Correct VLP-16 laser vertical angles (firing order)
+-- The lasers' firing order "hops around" to prevent cross-talk from the laser
+-- beams returning to the sensor. vlp16_vertical_angles is used in table.sort
+-- below so that the lua summary does appear in physical order and not firing order
+local vlp16_vertical_angles = {
+    -15.0,  1.0, -13.0,  3.0,
+    -11.0,  5.0,  -9.0,  7.0,
+     -7.0,  9.0,  -5.0, 11.0,
+     -3.0, 13.0,  -1.0, 15.0
+}
+
 -- Dissector function
 function velodyne_vlp16.dissector(buffer, pinfo, tree)
     length = buffer:len()
@@ -78,8 +89,10 @@ function velodyne_vlp16.dissector(buffer, pinfo, tree)
         block_tree:add(f_azimuth, buffer(block_start + 2, 2), azimuth_deg)
 
         -- 32 laser returns (bytes 4-99, 3 bytes each: dist uint16 LE, int uint8)
+        local laser_data = {}
         for laser = 0, 31 do
             local laser_id = laser % 16
+            local seq = math.floor(laser / 16) + 1
             local laser_start = block_start + 4 + laser * 3
             if laser_start + 3 > block_start + 100 then
                 break
@@ -89,14 +102,31 @@ function velodyne_vlp16.dissector(buffer, pinfo, tree)
             local intensity_raw = buffer(laser_start + 2, 1):le_uint()
             local intensity_norm = intensity_raw / 255.0
 
+            table.insert(laser_data, {
+                laser_id = laser_id,
+                seq = seq,
+                dist_m = dist_m,
+                intensity_norm = intensity_norm,
+                laser_start = laser_start
+            })
+        end
+
+        -- Sort laser data by vertical angle (ascending)
+        table.sort(laser_data, function(a, b)
+            return vlp16_vertical_angles[a.laser_id + 1] < vlp16_vertical_angles[b.laser_id + 1]
+        end)
+
+        -- Add sorted laser subtrees
+        for _, data in ipairs(laser_data) do
             -- Add laser subtree
-            local laser_tree = block_tree:add(tree, buffer(laser_start, 3), "Laser " .. laser_id .. " (Seq " .. (math.floor(laser / 16) + 1) .. ")")
-            laser_tree:add(f_laser_id, buffer(laser_start, 1), laser_id)
-            laser_tree:add(f_distance, buffer(laser_start, 2), dist_m)
-            laser_tree:add(f_intensity, buffer(laser_start + 2, 1), intensity_norm)
+            local angle = vlp16_vertical_angles[data.laser_id + 1]
+            local laser_tree = block_tree:add(tree, buffer(data.laser_start, 3), string.format("%.0f", angle) .. " deg (Laser " .. data.laser_id .. " Seq " .. data.seq .. ")")
+            laser_tree:add(f_laser_id, buffer(data.laser_start, 1), data.laser_id)
+            laser_tree:add(f_distance, buffer(data.laser_start, 2), data.dist_m)
+            laser_tree:add(f_intensity, buffer(data.laser_start + 2, 1), data.intensity_norm)
 
             -- Count valid points (0.4-120m, intensity > 0.1)
-            if dist_m >= 0.4 and dist_m <= 120.0 and intensity_norm > 0.1 then
+            if data.dist_m >= 0.4 and data.dist_m <= 120.0 and data.intensity_norm > 0.1 then
                 valid_points = valid_points + 1
             end
         end
